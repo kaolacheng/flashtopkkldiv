@@ -61,27 +61,28 @@ import torch.nn.functional as F
 
 def compute_teacher_topk_chunked(teacher_logits, chunk_size=1024):
     """Compute top-k indices and probs without materializing [N, V]."""
-    N = teacher_logits.shape[0]
-    V = teacher_logits.shape[1]
-    
-    all_indices = []
-    all_probs = []
-    
-    for i in range(0, V, chunk_size):
-        chunk = teacher_logits[:, i : i + chunk_size]  # [N, chunk_size]
-        k_chunk = min(topk, chunk_size)
-        k_vals, k_idx = torch.topk(chunk, k=k_chunk, dim=-1)  # [N, k_chunk]
+    with torch.no_grad(): #actually,teacher is not need grad
+        N = teacher_logits.shape[0]
+        V = teacher_logits.shape[1]
         
-        chunk_probs = F.softmax(k_vals / temperature, dim=-1)  # [N, k_chunk]
+        all_indices = []
+        all_probs = []
         
-        all_indices.append(k_idx)       # accumulate indices
-        all_probs.append(chunk_probs)   # accumulate probs
-    
-    # Concatenate along K dimension to get [N, topk]
-    teacher_indices = torch.cat(all_indices, dim=1)[:, :topk]
-    teacher_probs = torch.cat(all_probs, dim=1)[:, :topk]
-    
-    return teacher_indices, teacher_probs
+        for i in range(0, V, chunk_size):
+            chunk = teacher_logits[:, i : i + chunk_size]  # [N, chunk_size]
+            k_chunk = min(topk, chunk_size)
+            k_vals, k_idx = torch.topk(chunk, k=k_chunk, dim=-1)  # [N, k_chunk]
+            
+            chunk_probs = F.softmax(k_vals / temperature, dim=-1)  # [N, k_chunk]
+            
+            all_indices.append(k_idx)       # accumulate indices
+            all_probs.append(chunk_probs)   # accumulate probs
+        
+        # Concatenate along K dimension to get [N, topk]
+        teacher_indices = torch.cat(all_indices, dim=1)[:, :topk]
+        teacher_probs = torch.cat(all_probs, dim=1)[:, :topk]
+        
+        return teacher_indices, teacher_probs
 ```
 
 This reduces the peak memory for teacher side from **~V×B×S bytes** to just **~chunk_size×B×S bytes**. For `V=115K` with batch 4 × seq 128: full logits tensor is ~23 MiB (FP32), but chunking reduces this further and allows streaming.
