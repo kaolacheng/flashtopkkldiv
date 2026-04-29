@@ -44,6 +44,18 @@ output = sparse_index_matmul(x, e, idx)
 output = sparse_index_matmul_lib(x, e, idx)
 ```
 
+## Core Optimization
+
+The key bottleneck in KL divergence computation with large vocabularies is the **top-k embedding lookup** — a naive approach materializes an intermediate `[batch_size * seq_len, vocab_size]` tensor to get logits, then gathers the top-k entries. This wastes both memory and compute since we only need `K` out of `V` embeddings.
+
+This library replaces that with a custom [Triton](https://github.com/triton-lang/triton) kernel (`sparse_index_matmul`) that computes `hidden_state @ embedding[teacher_indices]` **directly**, without materializing the full intermediate tensor:
+
+| Aspect | Original (`kl_div_org`) | Optimized (`kl_div_fast`) |
+|--------|--------------------------|---------------------------|
+| Approach | Full embedding matmul → gather top-k | Sparse matmul with Triton kernel |
+| Intermediate memory | `[N, V]` dense tensor (~1 GiB) | None — computed on-the-fly |
+| Kernel | PyTorch native (gather + scatter) | Custom Triton forward + backward kernels |
+
 ## Kernels
 
 - `sparse_index_matmul` — Indexed sparse matrix multiplication (Triton)
@@ -64,15 +76,12 @@ output = sparse_index_matmul_lib(x, e, idx)
 **Speedup:** ~5.5x  
 **Memory Saved:** ~70% (~1 GiB saved for typical configurations)
 
-## Performance Comparison
-
-The `kl_div_fast` implementation avoids materializing the intermediate `[N, K, D]` gather tensor by using sparse index matrix multiplication directly:
-
-- **Original**: Projects hidden states to full vocabulary space → gathers top-k logits
-- **Fast**: Directly computes dot product with selected embeddings via Triton kernel
-
 ## Running Benchmarks
 
 ```bash
 python benchmark.py --device cuda --runs 5
 ```
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.
