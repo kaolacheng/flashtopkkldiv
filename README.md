@@ -117,6 +117,7 @@ This library replaces that with a custom [Triton](https://github.com/triton-lang
 | Batch Size | 4 |
 | Seq Len | 128 |
 | Top-K | 512 |
+|Device|RTX4060L|(For sample,this is enough)
 
 **Speedup:** ~5x (varies with K, 2.3x~27x)  
 **Memory Saved:** ~70% (~1 GiB saved for typical configurations)
