@@ -16,7 +16,7 @@ pip install -e .
 |------------|---------|-------|
 | Python | >=3.9 | |
 | PyTorch | >=2.0 | CUDA 12+ recommended |
-| Triton | >=2.0 | NVIDIA GPUs (Ampere/Ada/Hopper, sm_80+) |
+| Triton | >=2.0 | NVIDIA GPUs (Turing+ / sm_75+) |
 
 ## Usage
 
@@ -83,19 +83,19 @@ This library replaces that with a custom [Triton](https://github.com/triton-lang
 | Seq Len | 128 |
 | Top-K | 512 |
 
-**Speedup:** ~5.5x  
+**Speedup:** ~5x (varies with K, 2.3x~27x)  
 **Memory Saved:** ~70% (~1 GiB saved for typical configurations)
 
 ### Different K Values
 
-```bash
-# Benchmark with different Top-K values
-python benchmark.py --topk 64    --runs 3   # High sparsity
-python benchmark.py --topk 256   --runs 3   # Medium sparsity
-python benchmark.py --topk 1024  --runs 3   # Low sparsity
-```
+| Top-K (K) | Original (ms) | Fast (ms) | Speedup | Memory Saved |
+|-----------|--------------|-----------|---------|--------------|
+| 64 | 24.1 ± 0.9 | 0.89 ± 0.04 | **~27x** | ~128 MiB |
+| 256 | 22.9 ± 0.5 | 2.64 ± 0.08 | **~8.7x** | ~512 MiB |
+| 512 | 24.5 ± 1.7 | 4.9 ± 0.1 | **~5x** | ~1 GiB |
+| 1024 | 23.2 ± 1.0 | 9.96 ± 0.9 | **~2.3x** | ~2 GiB |
 
-> **Note:** Smaller K yields higher speedup due to greater sparsity. Kernel launch overhead dominates at very small K, so the gain plateaus for K < 64.
+> **Note:** Smaller K yields higher speedup due to greater sparsity. At larger K, the sparse kernel overhead becomes more significant relative to the benefit, so the speedup decreases but remains substantial.
 
 ## Running Benchmarks
 
@@ -107,7 +107,7 @@ python benchmark.py --topk 256 --vocab_size 115936 --hidden_dim 1024
 ## Limitations & Important Notes
 
 - **Teacher Top-K must be pre-computed.** This library assumes `teacher_indices` and `teacher_probs` are provided as inputs. It optimizes the *student side* only. For **online distillation** (same GPU, simultaneous teacher/student forward pass), you still need techniques like [gradient checkpointing](https://pytorch.org/docs/stable/checkpoint-support.html) or offloading for the teacher model.
-- **NVIDIA GPUs only.** Triton currently requires NVIDIA GPUs with compute capability >= 8.0 (Ampere and newer). Performance on older architectures may be degraded.
+- **NVIDIA GPUs only.** Triton supports Turing (sm_75) and newer architectures. Older architectures may experience reduced performance or compatibility issues.
 - **Single-batch optimization.** The benchmark uses batch_size=4, seq_len=128. For larger batches or longer sequences, the speedup ratio should scale similarly since the kernel is batch-independent.
 
 ## Future Work
