@@ -155,14 +155,34 @@ This library replaces that with a custom [Triton](https://github.com/triton-lang
 python benchmark.py --topk 256 --vocab_size 115936 --hidden_dim 1024
 ```
 
+### Different Precisions (Batch=4, SeqLen=128, HiddenDim=1024, Vocab=115936, Top-K=512)
+
+| Precision | Original (ms) | Fast (ms) | Speedup | Memory Saved |
+|-----------|--------------|-----------|---------|--------------|
+| float32   | 24.26 ± 0.78 | 5.09 ± 0.07 | **4.77x** | ~1 GiB |
+| bfloat16  | 6.32 ± 0.73  | 3.49 ± 0.04 | **1.81x** | ~512 MiB |
+| float16   | 3.94 ± 0.08  | 2.82 ± 0.42 | **1.40x** | ~512 MiB |
+
+> **Note:** Lower precision yields higher absolute speed but lower relative speedup ratio. This is because the original `gather` operation also benefits from Tensor Cores, narrowing the gap with the sparse kernel at smaller precisions. BF16 is recommended for the best balance of performance and numerical stability.
+
+### Large Tensor Scaling (Batch=8, SeqLen=1024)
+
+| Precision | Original (ms) | Fast (ms) | Speedup | Memory Saved |
+|-----------|--------------|-----------|---------|--------------|
+| float32 (~5.6GB tensor) | 684 ± 20    | 75 ± 5   | **9.1x** | ~16 GB |
+| bfloat16                  | 278 ± 7     | 55 ± 6   | **5.1x** | ~16 GB |
+| float16                   | 258 ± 9     | 52 ± 9   | **4.9x** | ~16 GB |
+
+> **Note:** With larger intermediate tensors (~5-16GB), the speedup increases significantly as kernel launch overhead is amortized. The advantage of `kl_div_fast` becomes more pronounced with bigger batches and longer sequences.
+
 ## Limitations & Important Notes
 
 - **Teacher Top-K must be pre-computed.** This library assumes `teacher_indices` and `teacher_probs` are provided as inputs. It optimizes the *student side* only. For **online distillation** (same GPU, simultaneous teacher/student forward pass), you still need techniques like [gradient checkpointing](https://pytorch.org/docs/stable/checkpoint-support.html) or offloading for the teacher model. See above for a recommended chunked-topk implementation that reduces teacher memory usage.
 - **NVIDIA GPUs only.** Triton supports Turing (sm_75) and newer architectures. Older architectures may experience reduced performance or compatibility issues.
-- **Precision considerations.** The library is designed for FP32 computation. For mixed precision training (FP16/BF16), note:
-  - KL divergence involves `log_softmax` which can produce numerical overflow in lower precisions — use FP32 accumulators for the logit computation step.
-  - The Triton kernel uses FP32 internal accumulation internally to prevent numerical issues.
-  - Recommended: convert teacher embeddings and hidden states to FP32 before passing to `kl_div_fast`, then cast back if needed.
+- **Precision considerations.** The library natively supports **FP16, BF16, and FP32** inputs. For KL divergence computation:
+  - `log_softmax` is numerically stable in all supported precisions.
+  - Internal accumulation uses the input dtype to preserve performance.
+  - Recommended: use FP32 for `teacher_probs` if they come from a different precision source.
 
 ## Future Work
 
