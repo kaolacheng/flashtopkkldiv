@@ -59,33 +59,33 @@ When running **online distillation** on a single GPU, computing `teacher_logits`
 ```python
 import torch.nn.functional as F
 
-def compute_teacher_topk_chunked(teacher_logits, chunk_size=1024):
+def compute_teacher_topk_chunked(teacher_logits, topk=512, temperature=1.0, chunk_size=1024):
     """Compute top-k indices and probs without materializing [N, V]."""
-    with torch.no_grad(): #actually,teacher is not need grad
+    with torch.no_grad():
         N = teacher_logits.shape[0]
         V = teacher_logits.shape[1]
-        
+
         all_indices = []
         all_probs = []
-        
+
         for i in range(0, V, chunk_size):
             chunk = teacher_logits[:, i : i + chunk_size]  # [N, chunk_size]
             k_chunk = min(topk, chunk_size)
             k_vals, k_idx = torch.topk(chunk, k=k_chunk, dim=-1)  # [N, k_chunk]
-            
+
             chunk_probs = F.softmax(k_vals / temperature, dim=-1)  # [N, k_chunk]
-            
+
             all_indices.append(k_idx)       # accumulate indices
             all_probs.append(chunk_probs)   # accumulate probs
-        
+
         # Concatenate along K dimension to get [N, topk]
         teacher_indices = torch.cat(all_indices, dim=1)[:, :topk]
         teacher_probs = torch.cat(all_probs, dim=1)[:, :topk]
-        
+
         return teacher_indices, teacher_probs
 ```
 
-This reduces the peak memory for teacher side from **~V×B×S bytes** to just **~chunk_size×B×S bytes**. For `V=115K` with batch 4 × seq 128: full logits tensor is ~23 MiB (FP32), but chunking reduces this further and allows streaming.
+This reduces the peak memory for teacher side from **~V×B×S bytes** to just **~chunk_size×B×S bytes**. For `V=115K` with batch 4 × seq 128: full logits tensor is ~237 MB (FP32), but chunking reduces this further and allows streaming.
 
 ## Core Optimization
 
@@ -117,9 +117,8 @@ This library replaces that with a custom [Triton](https://github.com/triton-lang
 | Batch Size | 4 |
 | Seq Len | 128 |
 | Top-K | 512 |
-|Device|RTX4060L|(For sample,this is enough)
 
-**Speedup:** ~5x (varies with K, 2.3x~27x)  
+**Speedup:** ~5x (varies with K, 2.3x~27x)
 **Memory Saved:** ~70% (~1 GiB saved for typical configurations)
 
 ### Different K Values
@@ -154,7 +153,6 @@ This library replaces that with a custom [Triton](https://github.com/triton-lang
 | 256 | 46.3 ± 0.6 | 9.5 ± 0.1 | **~4.9x** | ~2 GiB |
 
 > **Note:** Speedup is stable across sequence lengths. Linear scaling with seq_len confirms the kernel scales well for longer sequences.
-python benchmark.py --topk 256 --vocab_size 115936 --hidden_dim 1024
 
 
 ### Different Precisions (Batch=4, SeqLen=128, HiddenDim=1024, Vocab=115936, Top-K=512)
@@ -181,7 +179,7 @@ python benchmark.py --topk 256 --vocab_size 115936 --hidden_dim 1024
 
 - **Teacher Top-K must be pre-computed.** This library assumes `teacher_indices` and `teacher_probs` are provided as inputs. It optimizes the *student side* only. For **online distillation** (same GPU, simultaneous teacher/student forward pass), you still need techniques like [gradient checkpointing](https://pytorch.org/docs/stable/checkpoint-support.html) or offloading for the teacher model. See above for a recommended chunked-topk implementation that reduces teacher memory usage.
 - **NVIDIA GPUs only.** Triton supports Turing (sm_75) and newer architectures. Older architectures may experience reduced performance or compatibility issues.
-- **Precision considerations.** The library natively supports **FP16, BF16(>SM75), and FP32** inputs. For KL divergence computation:
+- **Precision considerations.** The library natively supports **FP16, BF16 (Ampere+ / SM80+), and FP32** inputs. For KL divergence computation:
   - `log_softmax` is numerically stable in all supported precisions.
   - Internal accumulation uses the input dtype to preserve performance.
   - Recommended: use FP32 for `teacher_probs` if they come from a different precision source.
