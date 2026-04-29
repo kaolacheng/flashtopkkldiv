@@ -180,7 +180,7 @@ python benchmark.py --topk 256 --vocab_size 115936 --hidden_dim 1024
 
 - **Teacher Top-K must be pre-computed.** This library assumes `teacher_indices` and `teacher_probs` are provided as inputs. It optimizes the *student side* only. For **online distillation** (same GPU, simultaneous teacher/student forward pass), you still need techniques like [gradient checkpointing](https://pytorch.org/docs/stable/checkpoint-support.html) or offloading for the teacher model. See above for a recommended chunked-topk implementation that reduces teacher memory usage.
 - **NVIDIA GPUs only.** Triton supports Turing (sm_75) and newer architectures. Older architectures may experience reduced performance or compatibility issues.
-- **Precision considerations.** The library natively supports **FP16, BF16, and FP32** inputs. For KL divergence computation:
+- **Precision considerations.** The library natively supports **FP16, BF16(>SM75), and FP32** inputs. For KL divergence computation:
   - `log_softmax` is numerically stable in all supported precisions.
   - Internal accumulation uses the input dtype to preserve performance.
   - Recommended: use FP32 for `teacher_probs` if they come from a different precision source.
