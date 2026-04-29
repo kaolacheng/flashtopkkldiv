@@ -1,6 +1,6 @@
 # Flash-TopkKldiv
 
-Triton kernels for sparse operations in KL divergence computation.
+Triton kernels for memory-efficient sparse KL divergence computation with up to **5.5x speedup** and **~70% memory reduction**.
 
 ## Installation
 
@@ -49,7 +49,7 @@ output = sparse_index_matmul_lib(x, e, idx)
 - `sparse_index_matmul` — Indexed sparse matrix multiplication (Triton)
 - `sparse_index_matmul_backward` — Autograd backward for x and e gradients
 - `kl_div_org` — Original KL divergence via explicit gather (memory-heavy)
-- `kl_div_fast` — Optimized KL divergence via sparse matmul (memory-efficient, ~6x faster)
+- `kl_div_fast` — Optimized KL divergence via sparse matmul (memory-efficient, ~5.5x faster)
 
 ## Benchmark Results
 
@@ -61,8 +61,8 @@ output = sparse_index_matmul_lib(x, e, idx)
 | Seq Len | 128 |
 | Top-K | 512 |
 
-**Speedup:** ~5.8x  
-**Memory Saved:** ~1 GiB (intermediate gather tensor)
+**Speedup:** ~5.5x  
+**Memory Saved:** ~70% (~1 GiB saved for typical configurations)
 
 ## Performance Comparison
 
@@ -70,3 +70,9 @@ The `kl_div_fast` implementation avoids materializing the intermediate `[N, K, D
 
 - **Original**: Projects hidden states to full vocabulary space → gathers top-k logits
 - **Fast**: Directly computes dot product with selected embeddings via Triton kernel
+
+## Running Benchmarks
+
+```bash
+python benchmark.py --device cuda --runs 5
+```
