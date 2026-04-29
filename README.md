@@ -153,7 +153,7 @@ This library replaces that with a custom [Triton](https://github.com/triton-lang
 
 > **Note:** Speedup is stable across sequence lengths. Linear scaling with seq_len confirms the kernel scales well for longer sequences.
 python benchmark.py --topk 256 --vocab_size 115936 --hidden_dim 1024
-```
+
 
 ### Different Precisions (Batch=4, SeqLen=128, HiddenDim=1024, Vocab=115936, Top-K=512)
 
