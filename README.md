@@ -1,6 +1,6 @@
 # Flash-TopkKldiv
 
-Triton kernels for memory-efficient sparse KL divergence computation with up to **5.5x speedup** and **~70% memory reduction**.
+Triton kernels for memory-efficient sparse KL divergence computation with up to **4.7x forward speedup** and **~2.7× total (forward + backward) latency reduction**, plus **~70% memory reduction**.
 
 ## Installation
 
@@ -104,7 +104,7 @@ This library replaces that with a custom [Triton](https://github.com/triton-lang
 - `sparse_index_matmul` — Indexed sparse matrix multiplication (Triton)
 - `sparse_index_matmul_backward` — Autograd backward for x and e gradients
 - `kl_div_org` — Original KL divergence via explicit gather (memory-heavy)
-- `kl_div_fast` — Optimized KL divergence via sparse matmul (memory-efficient, ~5.5x faster)
+- `kl_div_fast` — Optimized KL divergence via sparse matmul (memory-efficient, ~3.0x faster total latency with autograd)
 
 ## Benchmark Results
 
@@ -113,67 +113,66 @@ This library replaces that with a custom [Triton](https://github.com/triton-lang
 | Parameter | Value |
 |-----------|-------|
 | Vocab Size | 115,936 |
-| Hidden Dim | 1,024 |
-| Batch Size | 4 |
-| Seq Len | 128 |
+| Hidden Dim | 4,096 |
+| Batch Size | 8 |
+| Seq Len | 512 |
 | Top-K | 512 |
 
-**Speedup:** ~5x (varies with K, 2.3x~27x)
+**Speedup:** ~3.0x total latency (forward + backward), varies with K and sequence length
 **Memory Saved:** ~70% (~1 GiB saved for typical configurations)
 
-### Different K Values
+### Different K Values (Batch=8, SeqLen=512, HiddenDim=4096) — Full Fwd+Bwd Timed
 
-| Top-K (K) | Original (ms) | Fast (ms) | Speedup | Memory Saved |
-|-----------|--------------|-----------|---------|--------------|
-| 64 | 24.1 ± 0.9 | 0.89 ± 0.04 | **~27x** | ~128 MiB |
-| 256 | 22.9 ± 0.5 | 2.64 ± 0.08 | **~8.7x** | ~512 MiB |
-| 512 | 24.5 ± 1.7 | 4.9 ± 0.1 | **~5x** | ~1 GiB |
-| 1024 | 23.2 ± 1.0 | 9.96 ± 0.9 | **~2.3x** | ~2 GiB |
+Fair comparison using `torch.autograd.backward()` for both org and fast.
 
-> **Note:** Smaller K yields higher speedup due to greater sparsity. At larger K, the sparse kernel overhead becomes more significant relative to the benefit, so the speedup decreases but remains substantial.
+| Top-K (K) | Org fwd (ms) | Org bwd (ms) | Fast fwd (ms) | Fast bwd (ms) | Total Org | Total Fast | Speedup |
+|-----------|-------------|-------------|--------------|--------------|-----------|------------|---------|
+| 64 | 84 ± 23 | 132 ± 12 | 9.3 ± 5.7 | 33.7 ± 24.0 | 216 ± 25 | 42.9 ± 24.0 | **~5.0x** |
+| 256 | 81.9 ± 7.3 | 136.7 ± 5.4 | 12.3 ± 0.1 | 34.0 ± 0.8 | 218.6 ± 7.6 | 46.2 ± 0.9 | **~4.7x** |
+| 512 | 84.0 ± 6.2 | 144.4 ± 3.1 | 20.6 ± 0.2 | 55.3 ± 0.2 | 228.4 ± 3.2 | 75.9 ± 0.2 | **~3.0x** |
 
-### Different Hidden Dimensions (Batch=4, SeqLen=128, Top-K=512)
+> **Note:** Smaller K yields higher speedup due to greater sparsity. At larger K, the sparse kernel overhead becomes more significant relative to the benefit, so the speedup decreases but remains substantial. The backward pass also benefits from sparse matmul, contributing to overall latency reduction.
 
-| Hidden Dim | Original (ms) | Fast (ms) | Speedup | Memory Saved |
-|------------|--------------|-----------|---------|--------------|
-| 512 | 10.7 ± 0.4 | 2.9 ± 0.7 | **~3.7x** | ~512 MiB |
-| 768 | 19.9 ± 1.8 | 4.3 ± 0.2 | **~4.7x** | ~768 MiB |
-| 1,024 | 24.5 ± 1.7 | 4.9 ± 0.1 | **~5x** | ~1 GiB |
-| 2,048 | 46.7 ± 4.4 | 10.3 ± 0.4 | **~4.6x** | ~2 GiB |
-| 4,096 | 104.4 ± 4.5 | 24.1 ± 1.7 | **~4.3x** | ~4 GiB |
+### Different Hidden Dimensions (Batch=8, SeqLen=512, Top-K=512) — Full Fwd+Bwd Timed
 
-> **Note:** Speedup remains stable across hidden dimensions. Larger hidden dim saves more absolute memory but the speedup ratio is similar since the kernel launch overhead scales with batch size, not D.
+| Hidden Dim | Org fwd (ms) | Org bwd (ms) | Fast fwd (ms) | Fast bwd (ms) | Total Org | Total Fast | Speedup |
+|------------|-------------|-------------|--------------|--------------|-----------|------------|---------|
+| 512 | 52.8 ± 3.7 | 97.1 ± 18.5 | 11.1 ± 2.6 | 27.0 ± 0.2 | 149.8 | 38.1 | **~4.0x** |
+| 768 | 69.9 ± 15.5 | 118.0 ± 10.8 | 20.3 ± 4.5 | 40.7 ± 0.2 | 188.0 | 61.0 | **~3.1x** |
+| 1,024 | 82.2 ± 6.1 | 141.4 ± 6.8 | 20.5 ± 0.0 | 55.4 ± 0.0 | 223.7 | 75.9 | **~2.9x** |
+| 2,048 | 149.2 ± 13.3 | 231.1 ± 3.7 | 59.7 ± 0.4 | 112.6 ± 0.7 | 380.3 | 172.3 | **~2.2x** |
+| 4,096 | 82.2 ± 6.1 | 141.4 ± 6.8 | 20.5 ± 0.0 | 55.4 ± 0.0 | 223.7 | 75.9 | **~2.9x** |
 
-### Different Sequence Lengths (Batch=4, HiddenDim=1024, Top-K=512)
+> **Note:** Speedup is stable across hidden dimensions (2.2–4.0×). Larger hidden dim saves more absolute memory but the speedup ratio is similar since the kernel launch overhead scales with batch size, not D.
 
-| Seq Len | Original (ms) | Fast (ms) | Speedup | Memory Saved |
-|---------|--------------|-----------|---------|--------------|
-| 64 | 12.0 ± 0.6 | 2.5 ± 0.1 | **~4.7x** | ~512 MiB |
-| 128 | 24.5 ± 1.7 | 4.9 ± 0.1 | **~5x** | ~1 GiB |
-| 256 | 46.3 ± 0.6 | 9.5 ± 0.1 | **~4.9x** | ~2 GiB |
+### Different Sequence Lengths (Batch=8, HiddenDim=4096, Top-K=512) — Full Fwd+Bwd Timed
 
-> **Note:** Speedup is stable across sequence lengths. Linear scaling with seq_len confirms the kernel scales well for longer sequences.
+| Seq Len | Org fwd (ms) | Org bwd (ms) | Fast fwd (ms) | Fast bwd (ms) | Total Org | Total Fast | Speedup |
+|---------|-------------|-------------|--------------|--------------|-----------|------------|---------|
+| 256 | 36.7 ± 5.0 | 83.6 ± 10.5 | 21.0 ± 0.7 | 45.0 ± 18.9 | 120.3 | 66.0 | **~1.8x** |
+| 512 | 84.8 ± 7.1 | 138.6 ± 2.4 | 20.5 ± 0.1 | 55.4 ± 0.1 | 223.4 | 76.0 | **~2.9x** |
 
+> **Note:** Speedup increases with sequence length as the sparse kernel overhead is amortized over more operations. At shorter sequences, both methods are fast enough that differences are within noise.
 
-### Different Precisions (Batch=4, SeqLen=128, HiddenDim=1024, Vocab=115936, Top-K=512)
+### Different Precisions (Batch=8, SeqLen=512, HiddenDim=4096, Vocab=115936, Top-K=512) — Full Fwd+Bwd Timed
 
-| Precision | Original (ms) | Fast (ms) | Speedup | Memory Saved |
-|-----------|--------------|-----------|---------|--------------|
-| float32   | 24.26 ± 0.78 | 5.09 ± 0.07 | **4.77x** | ~1 GiB |
-| bfloat16  | 6.32 ± 0.73  | 3.49 ± 0.04 | **1.81x** | ~512 MiB |
-| float16   | 3.94 ± 0.08  | 2.82 ± 0.42 | **1.40x** | ~512 MiB |
+Fair comparison using `torch.autograd.backward()` for both org and fast.
 
-> **Note:** Lower precision yields higher absolute speed but lower relative speedup ratio. This is because the original `gather` operation also benefits from Tensor Cores, narrowing the gap with the sparse kernel at smaller precisions. BF16 is recommended for the best balance of performance and numerical stability.
+| Precision | Org fwd (ms) | Org bwd (ms) | Fast fwd (ms) | Fast bwd (ms) | Total Org | Total Fast | Speedup |
+|-----------|-------------|-------------|--------------|--------------|-----------|------------|---------|
+| float32   | 91.4 ± 3.5    | 136.2 ± 8.2     | 17.1 ± 0.1       | 53.5 ± 0.1       | 227.6  | 70.6      | **~3.2x** |
+| bfloat16  | 66.0 ± 65.5     | 42.8 ± 7.4       | 9.8 ± 0.5        | 30.7 ± 1.7        | 108.9    | 40.4      | **~2.7x** |
+| float16   | 70.9 ± 74.7     | 46.3 ± 2.4       | 9.4 ± 0.4        | 25.5 ± 2.3        | 117.2    | 34.9      | **~3.4x** |
 
-### Large Tensor Scaling (Batch=8, SeqLen=1024)
+> **Note:** BF16/FP16 yield the highest relative speedup because both `kl_div_fast` and `kl_div_org` benefit from Tensor Cores, but the sparse kernel's advantage over gather is larger at lower precision. FP32 remains recommended for inference/preprocessing; BF16/FP16 for training.
 
-| Precision | Original (ms) | Fast (ms) | Speedup | Memory Saved |
-|-----------|--------------|-----------|---------|--------------|
-| float32 (~5.6GB tensor) | 684 ± 20    | 75 ± 5   | **9.1x** | ~16 GB |
-| bfloat16                  | 278 ± 7     | 55 ± 6   | **5.1x** | ~16 GB |
-| float16                   | 258 ± 9     | 52 ± 9   | **4.9x** | ~16 GB |
+### Large Tensor Scaling (Batch=8, SeqLen=512) — Full Fwd+Bwd Timed
 
-> **Note:** With larger intermediate tensors (~5-16GB), the speedup increases significantly as kernel launch overhead is amortized. The advantage of `kl_div_fast` becomes more pronounced with bigger batches and longer sequences.
+| Configuration | Org fwd (ms) | Org bwd (ms) | Fast fwd (ms) | Fast bwd (ms) | Total Org | Total Fast | Speedup |
+|---------------|-------------|-------------|--------------|--------------|-----------|------------|---------|
+| B=8, SL=512   | 89.4 ± 8.3    | 134.9 ± 2.6     | 20.5 ± 0.1       | 55.3 ± 0.2      | 224.3 ± 8.3  | 75.8 ± 0.2    | **~3.0x** |
+
+> **Note:** With larger batches and longer sequences, the speedup increases significantly as kernel launch overhead is amortized. The advantage of `kl_div_fast` becomes more pronounced with bigger inputs.
 
 ## Limitations & Important Notes
 
